@@ -1,30 +1,26 @@
 # Kyro
 
-Kyro는 Kubernetes 서비스에서 발생한 장애를 분석하고, 원인 추론부터 안전한 복구 변경까지 이어주는 자동화 시스템입니다.
+Kyro는 Kubernetes 서비스에서 발생한 장애를 분석하고, 원인 추론부터 안전한 복구 변경까지 이어주는 백엔드 시스템입니다.
 
-이 저장소는 Kyro를 Java/Spring Boot 기반으로 다시 다듬기 위한 백엔드 프로젝트입니다. 현재는 기존 Python 프로젝트의 핵심 흐름만 옮겨온 가벼운 시작점이며, 프론트엔드와 배포 자동화, 실제 외부 연동 구현은 포함하지 않습니다.
+운영자가 장애 상황에서 반복적으로 수행하는 증거 수집, 원인 후보 정리, 복구 액션 판단, 변경안 생성 과정을 하나의 흐름으로 연결하는 것을 목표로 합니다. 현재 저장소는 기존 Python 기반 프로젝트를 Java/Spring Boot로 다시 설계하며 핵심 도메인 흐름을 옮겨온 단계입니다.
 
-원본 프로젝트 `C:\workspace\python_project\Kyro-jungle-final`은 수정하지 않았습니다.
+## 왜 다시 만들었나
 
-## 핵심 방향
+기존 프로젝트는 빠르게 기능을 검증하기 위해 여러 워커, 이벤트, GitOps 흐름이 Python 중심으로 구성되어 있었습니다. 이번 Java 전환에서는 단순 포팅보다 유지보수 가능한 백엔드 구조를 먼저 잡는 데 집중했습니다.
 
-Kyro는 먼저 모듈형 모놀리스로 구성합니다.
+- 장애 분석 흐름을 도메인 모듈 단위로 나누기
+- 이벤트 기반으로 모듈 간 결합 낮추기
+- 복구 변경 생성 전 안전 정책을 명시적으로 두기
+- 나중에 외부 워커나 메시지 브로커로 확장할 수 있는 경계 만들기
 
-- Spring Boot로 애플리케이션 실행 경계를 잡습니다.
-- Spring Modulith로 도메인 모듈을 명확하게 나눕니다.
-- 모듈 간 통신은 Spring Application Event를 우선 사용합니다.
-- Spring Modulith의 JPA event publication registry로 이벤트 처리 내구성을 확보할 수 있게 둡니다.
-- Flyway와 PostgreSQL 호환 스키마를 기준으로 데이터베이스 구조를 확장합니다.
-- Java record로 요청, 응답, 이벤트 payload 계약을 간결하게 표현합니다.
+## 현재 구현 범위
 
-이 구조는 Python 프로젝트의 컨트롤러, 이벤트, 워커 흐름을 Java에서 다시 잡기 위한 기반입니다. 모든 워커를 처음부터 별도 서비스로 분리하기보다, 모듈 계약을 먼저 안정화하는 방향을 선택했습니다.
-
-## 핵심 흐름
+현재 코드는 실제 외부 시스템을 붙이기 전의 가벼운 백엔드 스켈레톤입니다. 다만 단순 예제 프로젝트가 아니라, Kyro의 핵심 흐름이 들어갈 위치와 모듈 경계를 먼저 잡아둔 상태입니다.
 
 ```text
 cluster.evidence.received
   -> evidence.built
-  -> incident.detected + evidence.bundle.built
+  -> incident.detected
   -> rca.candidates.planned
   -> rca.candidates.evaluated
   -> rca.completed
@@ -32,78 +28,71 @@ cluster.evidence.received
   -> recovery.action_selected
   -> safe_pr.requested
   -> safe_pr.patch_prepared
-  -> safe_pr.ready_for_creation
   -> safe_pr.created
 ```
 
-현재 코드는 의도적으로 얇게 유지되어 있습니다. 로직이 들어갈 위치와 이벤트 흐름을 보여주지만, Kubernetes API, Prometheus, Loki, Tempo, GitHub/SCM, Redis, AI provider, WebSocket gateway, React console은 아직 연결하지 않았습니다.
+주요 모듈은 다음과 같습니다.
 
-내부 모듈 통신은 Spring Application Event를 기준으로 하며, 외부 메시지 브로커는 현재 범위에 포함하지 않습니다.
+| Module | Responsibility |
+| --- | --- |
+| `evidence` | Kubernetes 장애 증거 수집과 정규화 진입점 |
+| `incident` | 장애 식별과 incident 이벤트 모델 |
+| `rca` | 원인 후보 계획, 평가, 분석 결과 생성 |
+| `recovery` | 복구 후보 선택과 액션 계획 |
+| `gitops` | 안전한 Pull Request 생성 흐름 |
+| `audit` | 이벤트 감사와 추적 |
+| `common` | 공통 이벤트, 응답, 워커 카탈로그 |
 
-## 패키지 구성
+## 기술 선택
 
-| Java package | Python 프로젝트에서 가져온 개념 | 역할 |
-| --- | --- | --- |
-| `common.event` | `packages/contracts/event_bus`, `packages/events`, `packages/runtime` | 이벤트 subject, metadata, publisher port |
-| `common.worker` | `src/services/**/app.py`, `scripts/services.py` | 워커 목록과 실행 슬롯 |
-| `target` | `domains/target`, `services/target/cluster-agent` | 분석 대상 식별자 |
-| `evidence` | `domains/evidence`, `services/ai/evidence-worker` | 장애 증거 수집과 정규화 진입점 |
-| `incident` | AI/RCA 흐름의 incident signal 처리 | 장애 식별 이벤트 |
-| `rca` | `domains/rca`, `services/ai/*worker` | 원인 분석 계획, 평가, 결정 |
-| `recovery` | recovery selection, dispatch setup | 복구 후보 선택과 액션 계획 |
-| `gitops` | `domains/gitops`, `services/gitops/*worker` | 안전한 PR 생성 준비 |
-| `audit` | `domains/audit`, `audit-worker` | 이벤트 감사 listener |
+### Spring Boot
 
-## 로컬 실행
+애플리케이션 실행, HTTP API, 설정, 관측성, 데이터 접근을 안정적으로 구성하기 위해 Spring Boot를 사용했습니다. 장애 분석과 복구 자동화처럼 운영 도메인과 외부 연동이 많은 시스템에서는 프레임워크가 제공하는 표준 구조를 활용하는 편이 장기 유지보수에 유리하다고 판단했습니다.
 
-Gradle wrapper가 포함되어 있습니다. JDK를 설치한 뒤 아래 명령으로 실행할 수 있습니다.
+### Spring Modulith
 
-```powershell
-cd C:\workspace\java_project
-cd .\kyro-java
-.\gradlew.bat test
-.\gradlew.bat bootRun
-```
+처음부터 마이크로서비스로 나누기보다 Spring Modulith 기반의 모듈형 모놀리스로 시작하기로 했습니다. Kyro는 `evidence -> rca -> recovery -> gitops`처럼 도메인 흐름이 강하게 이어지기 때문에, 초기에는 하나의 애플리케이션 안에서 모듈 경계를 명확히 두는 편이 더 적합했습니다.
 
-기본 datasource는 로컬 실행을 쉽게 하기 위해 PostgreSQL 호환 모드의 H2를 사용합니다.
+이 선택을 통해 다음을 기대합니다.
 
-PostgreSQL로 연결하려면 아래 환경 변수를 설정합니다.
+- 서비스 분리보다 먼저 도메인 계약을 안정화
+- 모듈 간 통신을 Application Event 중심으로 정리
+- 테스트와 로컬 실행을 단순하게 유지
+- 필요해진 시점에 특정 모듈만 외부 워커로 분리
 
-```powershell
-$env:KYRO_DATASOURCE_URL = "jdbc:postgresql://localhost:5432/kyro"
-$env:KYRO_DATASOURCE_USERNAME = "kyro"
-$env:KYRO_DATASOURCE_PASSWORD = "kyro"
-```
+### JPA와 PostgreSQL
+
+운영 이벤트, 분석 결과, 복구 판단, PR 상태처럼 추적 가능한 데이터가 중요하기 때문에 JPA와 PostgreSQL을 기본 방향으로 잡았습니다. 현재는 로컬 실행 편의를 위해 H2의 PostgreSQL compatibility mode를 기본값으로 두고, 실제 운영 DB는 환경 변수로 연결할 수 있게 했습니다.
+
+## NATS를 아직 도입하지 않은 이유
+
+초기 검토에서는 NATS JetStream 같은 메시지 브로커도 고려했습니다. 하지만 현재 단계의 Kyro는 하나의 Spring Boot 애플리케이션 안에서 모듈 간 이벤트 흐름을 검증하는 것이 우선입니다.
+
+그래서 지금은 외부 브로커 대신 Spring Application Event와 Spring Modulith의 이벤트 발행 구조를 사용합니다. NATS는 별도 프로세스의 워커, 클러스터 에이전트, 장기 실행 작업처럼 실제 프로세스 경계가 생긴 뒤 도입하는 편이 더 자연스럽다고 판단했습니다.
+
+## 기술적 고민
+
+### 이벤트 흐름과 트랜잭션 경계
+
+장애 분석은 여러 단계가 이어지는 파이프라인처럼 보이지만, 모든 단계를 하나의 트랜잭션으로 묶으면 장애 복구 시스템 자체가 취약해질 수 있습니다. 그래서 각 모듈은 이벤트를 통해 다음 단계로 넘어가고, 추후 필요한 지점에 이벤트 저장소나 재처리 전략을 붙일 수 있도록 설계하고 있습니다.
+
+### 자동 복구의 안전성
+
+Kyro의 목표는 자동으로 변경을 만드는 것이지만, 운영 환경에서는 "자동 적용"보다 "검증 가능한 제안"이 먼저입니다. 현재 구조는 복구 액션을 바로 실행하지 않고 Safe PR 흐름으로 연결되도록 설계되어 있습니다. source path, policy, approval, audit 같은 안전 장치를 이후 단계에서 명확히 추가할 예정입니다.
+
+### 모듈형 모놀리스와 확장성
+
+처음부터 분산 시스템으로 만들면 메시징, 배포, 장애 처리 복잡도가 먼저 커질 수 있습니다. 그래서 현재는 모듈형 모놀리스로 도메인 경계를 선명하게 만들고, 실제 병목이나 독립 배포 필요가 확인된 모듈만 외부 서비스로 분리하는 방향을 선택했습니다.
 
 ## API 시작점
 
-- `POST /api/evidence`: Kubernetes 장애 증거 payload를 받아 이벤트 흐름을 시작합니다.
-- `GET /api/system/workers`: Python Golden Path에서 옮겨온 워커 슬롯 목록을 확인합니다.
-- `GET /api/incidents/{incidentId}/rca`: RCA 결과 조회를 위한 placeholder endpoint입니다.
-- `POST /api/recovery/actions/{incidentId}/select`: 복구 액션 수동 선택을 위한 placeholder endpoint입니다.
-- `GET /api/safe-pr/{incidentId}`: Safe PR 상태 조회를 위한 placeholder endpoint입니다.
+- `POST /api/evidence`: 장애 증거를 받아 분석 이벤트 흐름을 시작합니다.
+- `GET /api/system/workers`: 현재 정의된 워커 슬롯을 확인합니다.
+- `GET /api/incidents/{incidentId}/rca`: RCA 결과 조회를 위한 시작점입니다.
+- `POST /api/recovery/actions/{incidentId}/select`: 복구 액션 선택 흐름의 시작점입니다.
+- `GET /api/safe-pr/{incidentId}`: Safe PR 상태 조회를 위한 시작점입니다.
 
-예시 evidence payload:
+## 문서
 
-```json
-{
-  "workspaceId": "local",
-  "targetId": "kind-target",
-  "clusterName": "kind",
-  "namespace": "shop",
-  "workloadName": "shop-api",
-  "reason": "ImagePullBackOff",
-  "message": "image tag does not exist",
-  "observedImage": "registry.example/shop-api:bad",
-  "desiredImage": "registry.example/shop-api:stable",
-  "sourceRef": "apps/shop-api/deployment.yaml"
-}
-```
-
-## 앞으로 채워갈 것
-
-- Kubernetes, observability, SCM provider adapter 연결
-- RCA rule catalog와 AI 분석 provider 분리
-- incident, evidence, recovery, safe PR projection 저장소 구현
-- 복구 변경 생성 전 source authority와 safety policy 검증 강화
-- 모듈 계약이 안정화된 뒤 필요한 워커만 별도 프로세스로 분리
+- [개발 가이드](docs/DEVELOPMENT.md)
+- [아키텍처 메모](docs/ARCHITECTURE.md)
