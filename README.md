@@ -19,33 +19,7 @@ Python으로도 충분히 구조화된 코드를 만들 수 있지만, 기본 �
 
 ## 현재 구현 범위
 
-현재 코드는 실제 외부 시스템을 붙이기 전의 가벼운 백엔드 스켈레톤입니다. 다만 단순 예제 프로젝트가 아니라, Kyro의 핵심 흐름이 들어갈 위치와 모듈 경계를 먼저 잡아둔 상태입니다.
-
-```text
-cluster.evidence.received
-  -> evidence.built
-  -> incident.detected
-  -> rca.candidates.planned
-  -> rca.candidates.evaluated
-  -> rca.completed
-  -> recovery.planned
-  -> recovery.action_selected
-  -> safe_pr.requested
-  -> safe_pr.patch_prepared
-  -> safe_pr.created
-```
-
-주요 모듈은 다음과 같습니다.
-
-| Module     | Responsibility                            |
-| ---------- | ----------------------------------------- |
-| `evidence` | Kubernetes 장애 증거 수집과 정규화 진입점 |
-| `incident` | 장애 식별과 incident 이벤트 모델          |
-| `rca`      | 원인 후보 계획, 평가, 분석 결과 생성      |
-| `recovery` | 복구 후보 선택과 액션 계획                |
-| `gitops`   | 안전한 Pull Request 생성 흐름             |
-| `audit`    | 이벤트 감사와 추적                        |
-| `common`   | 공통 이벤트, 응답, 워커 카탈로그          |
+- Kubernetes 장애 증거 수집부터 RCA, 복구 액션 선택, Safe PR 생성까지 이어지는 핵심 백엔드 흐름을 모듈 단위로 구성했습니다.
 
 ## 기술 선택
 
