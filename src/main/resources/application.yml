@@ -1,0 +1,24 @@
+spring:
+  application:
+    name: kyro-core
+  datasource:
+    url: ${KYRO_DATASOURCE_URL:jdbc:h2:mem:kyro;MODE=PostgreSQL;DATABASE_TO_LOWER=TRUE;DB_CLOSE_DELAY=-1}
+    username: ${KYRO_DATASOURCE_USERNAME:sa}
+    password: ${KYRO_DATASOURCE_PASSWORD:}
+  flyway:
+    enabled: true
+  jpa:
+    hibernate:
+      ddl-auto: validate
+    open-in-view: false
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info,metrics,modulith
+
+kyro:
+  agent-access-mode: read_only
+  remediation-delivery-mode: pull_request
+  production-auto-merge-enabled: false
